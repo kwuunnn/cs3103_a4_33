@@ -17,6 +17,50 @@
         "documentation": {}
     },
     {
+        "label": "csv",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "csv",
+        "description": "csv",
+        "detail": "csv",
+        "documentation": {}
+    },
+    {
+        "label": "sys",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "sys",
+        "description": "sys",
+        "detail": "sys",
+        "documentation": {}
+    },
+    {
+        "label": "matplotlib.pyplot",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "matplotlib.pyplot",
+        "description": "matplotlib.pyplot",
+        "detail": "matplotlib.pyplot",
+        "documentation": {}
+    },
+    {
+        "label": "numpy",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "numpy",
+        "description": "numpy",
+        "detail": "numpy",
+        "documentation": {}
+    },
+    {
+        "label": "defaultdict",
+        "importPath": "collections",
+        "description": "collections",
+        "isExtraImport": true,
+        "detail": "collections",
+        "documentation": {}
+    },
+    {
         "label": "sys,",
         "kind": 6,
         "isExtraImport": true,
@@ -154,6 +198,69 @@
         "description": "hudp",
         "peekOfCode": "RETX_INTERVAL_MS = 50  # retransmit every 50ms until ack or skip\nlogging.basicConfig(level=logging.INFO, format=\"%(asctime)s %(levelname)s %(message)s\")\ndef now_ms():\n    return int(time.time() * 1000)\nclass GameNetAPI:\n    def __init__(self, local_addr=(\"0.0.0.0\", 10000), peer_addr=None, on_receive: Callable=None,\n                 skip_threshold_ms=DEFAULT_SKIP_MS, max_buffered=1024):\n        \"\"\"\n        on_receive(channel, seq, timestamp_ms, payload_bytes)\n        \"\"\"",
         "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "load_data",
+        "kind": 2,
+        "importPath": "plot_analysis",
+        "description": "plot_analysis",
+        "peekOfCode": "def load_data(csv_file=\"recv_log.csv\"):\n    \"\"\"Load and parse the CSV log file.\"\"\"\n    data = []\n    with open(csv_file, 'r') as f:\n        reader = csv.reader(f)\n        for row in reader:\n            if len(row) >= 5:\n                arrival = int(row[0])\n                channel = int(row[1])  # 0=reliable, 1=unreliable\n                seq = int(row[2])",
+        "detail": "plot_analysis",
+        "documentation": {}
+    },
+    {
+        "label": "plot_latency_over_time",
+        "kind": 2,
+        "importPath": "plot_analysis",
+        "description": "plot_analysis",
+        "peekOfCode": "def plot_latency_over_time(data):\n    \"\"\"Plot latency over time for reliable and unreliable channels.\"\"\"\n    reliable = [d for d in data if d['channel'] == 0]\n    unreliable = [d for d in data if d['channel'] == 1]\n    plt.figure(figsize=(12, 6))\n    if reliable:\n        r_times = [(d['arrival'] - data[0]['arrival']) / 1000 for d in reliable]  # seconds\n        r_latencies = [d['latency'] for d in reliable]\n        plt.scatter(r_times, r_latencies, alpha=0.6, s=30, label='Reliable', color='blue')\n    if unreliable:",
+        "detail": "plot_analysis",
+        "documentation": {}
+    },
+    {
+        "label": "plot_latency_distribution",
+        "kind": 2,
+        "importPath": "plot_analysis",
+        "description": "plot_analysis",
+        "peekOfCode": "def plot_latency_distribution(data):\n    \"\"\"Plot latency distribution histogram.\"\"\"\n    reliable = [d['latency'] for d in data if d['channel'] == 0]\n    unreliable = [d['latency'] for d in data if d['channel'] == 1]\n    fig, axes = plt.subplots(1, 2, figsize=(14, 5))\n    # Reliable channel\n    if reliable:\n        axes[0].hist(reliable, bins=30, alpha=0.7, color='blue', edgecolor='black')\n        axes[0].axvline(np.mean(reliable), color='red', linestyle='--', \n                       label=f'Mean: {np.mean(reliable):.1f}ms')",
+        "detail": "plot_analysis",
+        "documentation": {}
+    },
+    {
+        "label": "plot_throughput",
+        "kind": 2,
+        "importPath": "plot_analysis",
+        "description": "plot_analysis",
+        "peekOfCode": "def plot_throughput(data):\n    \"\"\"Plot throughput (packets per second) over time.\"\"\"\n    if not data:\n        return\n    # Calculate throughput in 1-second windows\n    start_time = data[0]['arrival']\n    end_time = data[-1]['arrival']\n    duration_sec = (end_time - start_time) / 1000\n    # Count packets in 1-second bins\n    bins = defaultdict(lambda: {'reliable': 0, 'unreliable': 0})",
+        "detail": "plot_analysis",
+        "documentation": {}
+    },
+    {
+        "label": "plot_sequence_timeline",
+        "kind": 2,
+        "importPath": "plot_analysis",
+        "description": "plot_analysis",
+        "peekOfCode": "def plot_sequence_timeline(data):\n    \"\"\"Plot sequence numbers over time to visualize reordering.\"\"\"\n    reliable = [d for d in data if d['channel'] == 0]\n    unreliable = [d for d in data if d['channel'] == 1]\n    plt.figure(figsize=(12, 6))\n    if reliable:\n        r_times = [(d['arrival'] - data[0]['arrival']) / 1000 for d in reliable]\n        r_seqs = [d['seq'] for d in reliable]\n        plt.scatter(r_times, r_seqs, alpha=0.6, s=30, label='Reliable', color='blue')\n    if unreliable:",
+        "detail": "plot_analysis",
+        "documentation": {}
+    },
+    {
+        "label": "print_statistics",
+        "kind": 2,
+        "importPath": "plot_analysis",
+        "description": "plot_analysis",
+        "peekOfCode": "def print_statistics(data):\n    \"\"\"Print summary statistics.\"\"\"\n    reliable = [d for d in data if d['channel'] == 0]\n    unreliable = [d for d in data if d['channel'] == 1]\n    print(\"\\n\" + \"=\"*60)\n    print(\"STATISTICS SUMMARY\")\n    print(\"=\"*60)\n    print(f\"\\nTotal Packets: {len(data)}\")\n    print(f\"  Reliable:   {len(reliable)} ({len(reliable)/len(data)*100:.1f}%)\")\n    print(f\"  Unreliable: {len(unreliable)} ({len(unreliable)/len(data)*100:.1f}%)\")",
+        "detail": "plot_analysis",
+        "documentation": {}
+    },
+    {
+        "label": "main",
+        "kind": 2,
+        "importPath": "plot_analysis",
+        "description": "plot_analysis",
+        "peekOfCode": "def main():\n    csv_file = sys.argv[1] if len(sys.argv) > 1 else \"recv_log.csv\"\n    print(f\"\\n📊 Analyzing {csv_file}...\")\n    try:\n        data = load_data(csv_file)\n        if not data:\n            print(\"❌ No data found in CSV file!\")\n            return\n        print(f\"✓ Loaded {len(data)} packets\\n\")\n        # Generate all plots",
+        "detail": "plot_analysis",
         "documentation": {}
     },
     {
