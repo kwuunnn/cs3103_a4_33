@@ -1,4 +1,4 @@
-import socket, threading, struct, time, random, collections, logging
+import socket, threading, struct, time, random, logging
 from typing import Callable
 
 # Header formats
@@ -42,14 +42,16 @@ class GameNetAPI:
         self.on_receive = on_receive or (lambda *args, **kw: None)
         self.skip_threshold_ms = skip_threshold_ms
         self.seq_lock = threading.Lock()
-        self.next_seq = 0  # sender seq
-        # Sender reliable buffer: seq -> {data, send_time, last_send, acked, retrans_count}
+        self.next_seq_reliable = 0  # Only for reliable packets
+        self.next_seq_unreliable = 0  # optional, only for logging
+
+        # Sender reliable buffer: seq -> {data, send_time_ms, last_send, acked, retrans_count}
         self.sent_buffer = {}
         self.sent_lock = threading.Lock()
 
         # Receiver buffering for reliable channel
         self.recv_next_expected = 0
-        self.recv_buffer = {}  # seq -> (timestamp, payload, arrival_time)
+        self.recv_buffer = {}  # seq -> (timestamp_ms, payload, arrival_ms)
         self.recv_lock = threading.Lock()
         self.max_buffered = max_buffered
 
@@ -106,25 +108,33 @@ class GameNetAPI:
         return seq, timestamp
 
     def send(self, payload: bytes, reliable: bool = True):
-        """API for application to send data."""
-        with self.seq_lock:
-            seq = self.next_seq
-            self.next_seq = (self.next_seq + 1) & 0xFFFF
-        timestamp = now_ms()
-        channel = CHANNEL_RELIABLE if reliable else CHANNEL_UNRELIABLE
-        pkt = self._pack_data(channel, seq, timestamp, payload)
+        if reliable:
+            with self.seq_lock:
+                seq = self.next_seq_reliable
+                self.next_seq_reliable = (self.next_seq_reliable + 1) & 0xFFFF
+            channel = CHANNEL_RELIABLE
+        else:
+            with self.seq_lock:
+                seq = self.next_seq_unreliable
+                self.next_seq_unreliable = (self.next_seq_unreliable + 1) & 0xFFFF
+            channel = CHANNEL_UNRELIABLE
+
+        timestamp_ms = now_ms()
+        pkt = self._pack_data(channel, seq, timestamp_ms, payload)
+
         if self.peer_addr is None:
             raise RuntimeError("peer_addr not set")
 
         # Send the datagram
         self.sock.sendto(pkt, self.peer_addr)
+
         if reliable:
             self.metrics["sent_reliable"] += 1
             with self.sent_lock:
                 self.sent_buffer[seq] = {
                     "pkt": pkt,
-                    "first_send": timestamp,
-                    "last_send": timestamp,
+                    "first_send_ms": timestamp_ms,
+                    "last_send_ms": timestamp_ms,
                     "acked": False,
                     "retrans_count": 0,
                 }
@@ -143,46 +153,43 @@ class GameNetAPI:
                 data, addr = self.sock.recvfrom(65536)
             except socket.timeout:
                 continue
-            # If peer not set, set it to first sender
+
             if self.peer_addr is None:
                 self.peer_addr = addr
 
-            # Try parse as ACK first
+            # Try parse as ACK
             ack_unpacked = self._unpack_ack(data)
             if ack_unpacked is not None:
                 seq, ts = ack_unpacked
                 self._handle_ack(seq, ts)
                 continue
 
-            # else parse as data
+            # parse as data
             parsed = self._unpack_data(data)
             if parsed is None:
                 continue
             channel, seq, ts, payload = parsed
-            arrival = now_ms()
+            arrival_ms = now_ms()
             if channel == CHANNEL_UNRELIABLE:
                 self.metrics["recv_unreliable"] += 1
-                # deliver immediately
+                rtt = arrival_ms - ts
                 logging.info(
-                    f"[RECV U ] seq={seq} ts={ts} arrival={arrival} len={len(payload)}"
+                    f"[RECV U ] seq={seq} ts={ts} arrival={arrival_ms} len={len(payload)} rtt={rtt}ms"
                 )
                 try:
                     self.on_receive(CHANNEL_UNRELIABLE, seq, ts, payload)
-                except Exception as e:
+                except Exception:
                     logging.exception("on_receive failed")
             else:
                 # reliable channel: send ACK and buffer/reorder
-                # send ack
                 ackpkt = self._pack_ack(seq, ts)
                 self.sock.sendto(ackpkt, addr)
-                arrival_info = (ts, payload, arrival)
                 with self.recv_lock:
                     if len(self.recv_buffer) < self.max_buffered:
-                        self.recv_buffer[seq] = arrival_info
-                    # attempt in-order delivery
+                        self.recv_buffer[seq] = (ts, payload, arrival_ms)
                     self._deliver_in_order_locked()
                 logging.info(
-                    f"[RECV R ] seq={seq} ts={ts} arrival={arrival} buffered={len(self.recv_buffer)}"
+                    f"[RECV R ] seq={seq} ts={ts} arrival={arrival_ms} buffered={len(self.recv_buffer)}"
                 )
 
     def _handle_ack(self, seq, ts):
@@ -191,25 +198,21 @@ class GameNetAPI:
             info = self.sent_buffer.get(seq)
             if info:
                 info["acked"] = True
-                info["ack_time"] = now
-                rtt = now - info["first_send"]
+                rtt = now - info["first_send_ms"]
                 self.metrics["acks_received"] += 1
                 logging.info(
                     f"[ACK] seq={seq} rtt_ms={rtt} retrans={info['retrans_count']}"
                 )
-                # remove from buffer
                 del self.sent_buffer[seq]
 
     def _deliver_in_order_locked(self):
         # caller must hold recv_lock
-        # deliver next_expected and advance
         progressed = True
         while progressed:
             progressed = False
             info = self.recv_buffer.get(self.recv_next_expected)
             if info:
-                ts, payload, arrival = info
-                # deliver to application
+                ts, payload, arrival_ms = info
                 self.metrics["recv_reliable"] += 1
                 try:
                     self.on_receive(
@@ -221,12 +224,8 @@ class GameNetAPI:
                 self.recv_next_expected = (self.recv_next_expected + 1) & 0xFFFF
                 progressed = True
             else:
-                # check skip threshold: if we have later packets and oldest later packet arrival > skip_threshold -> skip
                 if self.recv_buffer:
-                    # find smallest seq > next_expected that is present
-                    # because seq wraps, use simple comparison by scanning small window
                     candidates = sorted(self.recv_buffer.keys())
-                    # pick earliest arrival among candidates
                     earliest_seq = candidates[0]
                     ev = self.recv_buffer[earliest_seq]
                     arrival_time = ev[2]
@@ -247,21 +246,18 @@ class GameNetAPI:
                     if info["acked"]:
                         to_remove.append(seq)
                         continue
-                    age = now - info["first_send"]
+                    age = now - info["first_send_ms"]
                     if age >= self.skip_threshold_ms:
-                        # mark lost, stop retransmitting
                         logging.warning(
                             f"[SENDER SKIP] seq={seq} exceeded skip threshold {age} ms -> drop"
                         )
                         to_remove.append(seq)
                         self.metrics["lost_marked"] += 1
                         continue
-                    # time since last sent?
-                    if now - info["last_send"] >= RETX_INTERVAL_MS:
-                        # retransmit
+                    if now - info["last_send_ms"] >= RETX_INTERVAL_MS:
                         try:
                             self.sock.sendto(info["pkt"], self.peer_addr)
-                            info["last_send"] = now
+                            info["last_send_ms"] = now
                             info["retrans_count"] += 1
                             self.metrics["retransmissions"] += 1
                             logging.info(
