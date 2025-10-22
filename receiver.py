@@ -1,35 +1,22 @@
-# receiver.py
-import sys, time, csv
+import time
 from hudp import GameNetAPI, CHANNEL_RELIABLE, CHANNEL_UNRELIABLE
-
-LOG_CSV = "recv_log.csv"
 
 
 def on_receive(channel, seq, ts, payload):
-    arrival = int(time.time() * 1000)
-    if channel == CHANNEL_RELIABLE:
-        print(f"[APP R] seq={seq} ts={ts} arrival={arrival} payload={payload.decode()}")
-    else:
-        print(f"[APP U] seq={seq} ts={ts} arrival={arrival} payload={payload.decode()}")
-    # you can also append to CSV for later analysis
-    with open(LOG_CSV, "a", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([arrival, channel, seq, ts, payload.decode()])
+    now = int(time.time() * 1000)
+    rtt = now - ts if channel == CHANNEL_RELIABLE else None
+    ch_str = "R" if channel == CHANNEL_RELIABLE else "U"
+    print(f"[RECV {ch_str}] seq={seq} ts={ts} payload={payload} rtt={rtt}ms")
 
 
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("usage: python receiver.py <local_port>")
-        sys.exit(1)
-    local_port = int(sys.argv[1])
-    api = GameNetAPI(
-        local_addr=("0.0.0.0", local_port), peer_addr=None, on_receive=on_receive
-    )
-    print("receiver listening on port", local_port)
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("stopping receiver...")
-        api.stop()
-        print("metrics:", api.get_metrics())
+# Receiver binds to port 10000
+receiver = GameNetAPI(local_addr=("127.0.0.1", 10000), on_receive=on_receive)
+
+print("Receiver running... press Ctrl+C to stop")
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    receiver.stop()
+    print("Receiver stopped")
+    print("Metrics:", receiver.get_metrics())

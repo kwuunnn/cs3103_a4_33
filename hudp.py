@@ -1,12 +1,11 @@
-# hudp.py
 import socket, threading, struct, time, random, collections, logging
 from typing import Callable
 
 # Header formats
-DATA_HDR_FMT = "!B H I"     # ChannelType (1), SeqNo (2), TimestampMs (4)
+DATA_HDR_FMT = "!B H I"  # ChannelType (1), SeqNo (2), TimestampMs (4)
 DATA_HDR_LEN = struct.calcsize(DATA_HDR_FMT)
 
-ACK_HDR_FMT = "!B B H I"    # ChannelType(1), ACK_FLAG(1), SeqNo(2), TimestampMs(4)
+ACK_HDR_FMT = "!B B H I"  # ChannelType(1), ACK_FLAG(1), SeqNo(2), TimestampMs(4)
 ACK_HDR_LEN = struct.calcsize(ACK_HDR_FMT)
 ACK_FLAG = 0xFF
 
@@ -20,12 +19,20 @@ RETX_INTERVAL_MS = 50  # retransmit every 50ms until ack or skip
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+
 def now_ms():
     return int(time.time() * 1000)
 
+
 class GameNetAPI:
-    def __init__(self, local_addr=("0.0.0.0", 10000), peer_addr=None, on_receive: Callable=None,
-                 skip_threshold_ms=DEFAULT_SKIP_MS, max_buffered=1024):
+    def __init__(
+        self,
+        local_addr=("0.0.0.0", 10000),
+        peer_addr=None,
+        on_receive: Callable = None,
+        skip_threshold_ms=DEFAULT_SKIP_MS,
+        max_buffered=1024,
+    ):
         """
         on_receive(channel, seq, timestamp_ms, payload_bytes)
         """
@@ -48,10 +55,13 @@ class GameNetAPI:
 
         # Metrics
         self.metrics = {
-            "sent_reliable": 0, "sent_unreliable": 0,
-            "recv_reliable": 0, "recv_unreliable": 0,
-            "acks_received": 0, "retransmissions": 0,
-            "lost_marked": 0
+            "sent_reliable": 0,
+            "sent_unreliable": 0,
+            "recv_reliable": 0,
+            "recv_unreliable": 0,
+            "acks_received": 0,
+            "retransmissions": 0,
+            "lost_marked": 0,
         }
 
         # Threading
@@ -65,7 +75,9 @@ class GameNetAPI:
         self.peer_addr = addr
 
     def _pack_data(self, channel, seq, timestamp_ms, payload: bytes):
-        hdr = struct.pack(DATA_HDR_FMT, channel, seq & 0xFFFF, timestamp_ms & 0xFFFFFFFF)
+        hdr = struct.pack(
+            DATA_HDR_FMT, channel, seq & 0xFFFF, timestamp_ms & 0xFFFFFFFF
+        )
         return hdr + payload
 
     def _unpack_data(self, data: bytes):
@@ -77,7 +89,13 @@ class GameNetAPI:
         return channel, seq, timestamp, payload
 
     def _pack_ack(self, seq, timestamp_ms):
-        return struct.pack(ACK_HDR_FMT, CHANNEL_RELIABLE, ACK_FLAG, seq & 0xFFFF, timestamp_ms & 0xFFFFFFFF)
+        return struct.pack(
+            ACK_HDR_FMT,
+            CHANNEL_RELIABLE,
+            ACK_FLAG,
+            seq & 0xFFFF,
+            timestamp_ms & 0xFFFFFFFF,
+        )
 
     def _unpack_ack(self, data: bytes):
         if len(data) < ACK_HDR_LEN:
@@ -87,7 +105,7 @@ class GameNetAPI:
             return None
         return seq, timestamp
 
-    def send(self, payload: bytes, reliable: bool=True):
+    def send(self, payload: bytes, reliable: bool = True):
         """API for application to send data."""
         with self.seq_lock:
             seq = self.next_seq
@@ -108,12 +126,14 @@ class GameNetAPI:
                     "first_send": timestamp,
                     "last_send": timestamp,
                     "acked": False,
-                    "retrans_count": 0
+                    "retrans_count": 0,
                 }
         else:
             self.metrics["sent_unreliable"] += 1
 
-        logging.debug(f"sent seq={seq} chan={'R' if reliable else 'U'} len={len(payload)}")
+        logging.debug(
+            f"sent seq={seq} chan={'R' if reliable else 'U'} len={len(payload)}"
+        )
         return seq
 
     def _recv_loop(self):
@@ -143,7 +163,9 @@ class GameNetAPI:
             if channel == CHANNEL_UNRELIABLE:
                 self.metrics["recv_unreliable"] += 1
                 # deliver immediately
-                logging.info(f"[RECV U ] seq={seq} ts={ts} arrival={arrival} len={len(payload)}")
+                logging.info(
+                    f"[RECV U ] seq={seq} ts={ts} arrival={arrival} len={len(payload)}"
+                )
                 try:
                     self.on_receive(CHANNEL_UNRELIABLE, seq, ts, payload)
                 except Exception as e:
@@ -159,7 +181,9 @@ class GameNetAPI:
                         self.recv_buffer[seq] = arrival_info
                     # attempt in-order delivery
                     self._deliver_in_order_locked()
-                logging.info(f"[RECV R ] seq={seq} ts={ts} arrival={arrival} buffered={len(self.recv_buffer)}")
+                logging.info(
+                    f"[RECV R ] seq={seq} ts={ts} arrival={arrival} buffered={len(self.recv_buffer)}"
+                )
 
     def _handle_ack(self, seq, ts):
         now = now_ms()
@@ -170,7 +194,9 @@ class GameNetAPI:
                 info["ack_time"] = now
                 rtt = now - info["first_send"]
                 self.metrics["acks_received"] += 1
-                logging.info(f"[ACK] seq={seq} rtt_ms={rtt} retrans={info['retrans_count']}")
+                logging.info(
+                    f"[ACK] seq={seq} rtt_ms={rtt} retrans={info['retrans_count']}"
+                )
                 # remove from buffer
                 del self.sent_buffer[seq]
 
@@ -186,7 +212,9 @@ class GameNetAPI:
                 # deliver to application
                 self.metrics["recv_reliable"] += 1
                 try:
-                    self.on_receive(CHANNEL_RELIABLE, self.recv_next_expected, ts, payload)
+                    self.on_receive(
+                        CHANNEL_RELIABLE, self.recv_next_expected, ts, payload
+                    )
                 except Exception:
                     logging.exception("on_receive callback error")
                 del self.recv_buffer[self.recv_next_expected]
@@ -203,7 +231,9 @@ class GameNetAPI:
                     ev = self.recv_buffer[earliest_seq]
                     arrival_time = ev[2]
                     if now_ms() - arrival_time >= self.skip_threshold_ms:
-                        logging.warning(f"[SKIP R] skipping missing seq={self.recv_next_expected} after {now_ms()-arrival_time} ms")
+                        logging.warning(
+                            f"[SKIP R] skipping missing seq={self.recv_next_expected} after {now_ms()-arrival_time} ms"
+                        )
                         self.recv_next_expected = (self.recv_next_expected + 1) & 0xFFFF
                         self.metrics["lost_marked"] += 1
                         progressed = True
@@ -220,7 +250,9 @@ class GameNetAPI:
                     age = now - info["first_send"]
                     if age >= self.skip_threshold_ms:
                         # mark lost, stop retransmitting
-                        logging.warning(f"[SENDER SKIP] seq={seq} exceeded skip threshold {age} ms -> drop")
+                        logging.warning(
+                            f"[SENDER SKIP] seq={seq} exceeded skip threshold {age} ms -> drop"
+                        )
                         to_remove.append(seq)
                         self.metrics["lost_marked"] += 1
                         continue
@@ -232,7 +264,9 @@ class GameNetAPI:
                             info["last_send"] = now
                             info["retrans_count"] += 1
                             self.metrics["retransmissions"] += 1
-                            logging.info(f"[RETX] seq={seq} count={info['retrans_count']}")
+                            logging.info(
+                                f"[RETX] seq={seq} count={info['retrans_count']}"
+                            )
                         except Exception:
                             logging.exception("retransmit failed")
                 for s in to_remove:

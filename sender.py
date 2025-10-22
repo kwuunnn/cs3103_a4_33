@@ -1,34 +1,23 @@
-# sender.py
-import sys, time, random
-from hudp import GameNetAPI
+import time
+import random
+from hudp import GameNetAPI, CHANNEL_RELIABLE, CHANNEL_UNRELIABLE
 
-def sample_on_receive(channel, seq, ts, payload):
-    # sender might also receive ACKs via API logs; we don't need to handle here
-    pass
+# Sender binds to different local port and sends to receiver port 10000
+sender = GameNetAPI(local_addr=("127.0.0.1", 10001), peer_addr=("127.0.0.1", 10000))
 
-if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("usage: python sender.py <local_port> <peer_ip:peer_port> [rate_pps]")
-        sys.exit(1)
-    local_port = int(sys.argv[1])
-    peer = sys.argv[2]
-    rate = float(sys.argv[3]) if len(sys.argv) >= 4 else 50.0
+packet_rate = 20  # packets per second
+duration = 5  # seconds
+total_packets = packet_rate * duration
 
-    peer_ip, peer_port = peer.split(":")
-    api = GameNetAPI(local_addr=("0.0.0.0", local_port), peer_addr=(peer_ip, int(peer_port)),
-                     on_receive=sample_on_receive)
-    print("sender running. sending to", peer)
-    try:
-        seq = 0
-        interval = 1.0 / rate
-        while True:
-            # prepare payload (simple JSON snippet or short string)
-            reliable = (random.random() < 0.5)  # 50% reliable
-            payload = f"msg {seq} reliable={reliable}".encode("utf-8")
-            api.send(payload, reliable=reliable)
-            seq += 1
-            time.sleep(interval)
-    except KeyboardInterrupt:
-        print("stopping sender...")
-        api.stop()
-        print("metrics:", api.get_metrics())
+for i in range(total_packets):
+    payload = {"id": i, "pos": [random.randint(0, 100), random.randint(0, 100)]}
+    reliable = random.choice([True, False])
+    seq = sender.send(str(payload).encode(), reliable=reliable)
+    ch_str = "R" if reliable else "U"
+    print(f"[SEND {ch_str}] seq={seq} payload={payload}")
+    time.sleep(1 / packet_rate)
+
+time.sleep(2)  # wait for retransmissions/acks
+sender.stop()
+print("Sender stopped")
+print("Metrics:", sender.get_metrics())
