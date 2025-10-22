@@ -1,0 +1,186 @@
+[
+    {
+        "label": "socket,",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "socket.",
+        "description": "socket.",
+        "detail": "socket.",
+        "documentation": {}
+    },
+    {
+        "label": "Callable",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "sys,",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "sys.",
+        "description": "sys.",
+        "detail": "sys.",
+        "documentation": {}
+    },
+    {
+        "label": "GameNetAPI",
+        "importPath": "hudp",
+        "description": "hudp",
+        "isExtraImport": true,
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "CHANNEL_RELIABLE",
+        "importPath": "hudp",
+        "description": "hudp",
+        "isExtraImport": true,
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "CHANNEL_UNRELIABLE",
+        "importPath": "hudp",
+        "description": "hudp",
+        "isExtraImport": true,
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "GameNetAPI",
+        "importPath": "hudp",
+        "description": "hudp",
+        "isExtraImport": true,
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "GameNetAPI",
+        "kind": 6,
+        "importPath": "hudp",
+        "description": "hudp",
+        "peekOfCode": "class GameNetAPI:\n    def __init__(self, local_addr=(\"0.0.0.0\", 10000), peer_addr=None, on_receive: Callable=None,\n                 skip_threshold_ms=DEFAULT_SKIP_MS, max_buffered=1024):\n        \"\"\"\n        on_receive(channel, seq, timestamp_ms, payload_bytes)\n        \"\"\"\n        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n        self.sock.bind(local_addr)\n        self.peer_addr = peer_addr\n        self.on_receive = on_receive or (lambda *args, **kw: None)",
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "now_ms",
+        "kind": 2,
+        "importPath": "hudp",
+        "description": "hudp",
+        "peekOfCode": "def now_ms():\n    return int(time.time() * 1000)\nclass GameNetAPI:\n    def __init__(self, local_addr=(\"0.0.0.0\", 10000), peer_addr=None, on_receive: Callable=None,\n                 skip_threshold_ms=DEFAULT_SKIP_MS, max_buffered=1024):\n        \"\"\"\n        on_receive(channel, seq, timestamp_ms, payload_bytes)\n        \"\"\"\n        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n        self.sock.bind(local_addr)",
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "DATA_HDR_FMT",
+        "kind": 5,
+        "importPath": "hudp",
+        "description": "hudp",
+        "peekOfCode": "DATA_HDR_FMT = \"!B H I\"     # ChannelType (1), SeqNo (2), TimestampMs (4)\nDATA_HDR_LEN = struct.calcsize(DATA_HDR_FMT)\nACK_HDR_FMT = \"!B B H I\"    # ChannelType(1), ACK_FLAG(1), SeqNo(2), TimestampMs(4)\nACK_HDR_LEN = struct.calcsize(ACK_HDR_FMT)\nACK_FLAG = 0xFF\n# Channel types\nCHANNEL_RELIABLE = 0\nCHANNEL_UNRELIABLE = 1\n# Default params\nDEFAULT_SKIP_MS = 200",
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "DATA_HDR_LEN",
+        "kind": 5,
+        "importPath": "hudp",
+        "description": "hudp",
+        "peekOfCode": "DATA_HDR_LEN = struct.calcsize(DATA_HDR_FMT)\nACK_HDR_FMT = \"!B B H I\"    # ChannelType(1), ACK_FLAG(1), SeqNo(2), TimestampMs(4)\nACK_HDR_LEN = struct.calcsize(ACK_HDR_FMT)\nACK_FLAG = 0xFF\n# Channel types\nCHANNEL_RELIABLE = 0\nCHANNEL_UNRELIABLE = 1\n# Default params\nDEFAULT_SKIP_MS = 200\nRETX_INTERVAL_MS = 50  # retransmit every 50ms until ack or skip",
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "ACK_HDR_FMT",
+        "kind": 5,
+        "importPath": "hudp",
+        "description": "hudp",
+        "peekOfCode": "ACK_HDR_FMT = \"!B B H I\"    # ChannelType(1), ACK_FLAG(1), SeqNo(2), TimestampMs(4)\nACK_HDR_LEN = struct.calcsize(ACK_HDR_FMT)\nACK_FLAG = 0xFF\n# Channel types\nCHANNEL_RELIABLE = 0\nCHANNEL_UNRELIABLE = 1\n# Default params\nDEFAULT_SKIP_MS = 200\nRETX_INTERVAL_MS = 50  # retransmit every 50ms until ack or skip\nlogging.basicConfig(level=logging.INFO, format=\"%(asctime)s %(levelname)s %(message)s\")",
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "ACK_HDR_LEN",
+        "kind": 5,
+        "importPath": "hudp",
+        "description": "hudp",
+        "peekOfCode": "ACK_HDR_LEN = struct.calcsize(ACK_HDR_FMT)\nACK_FLAG = 0xFF\n# Channel types\nCHANNEL_RELIABLE = 0\nCHANNEL_UNRELIABLE = 1\n# Default params\nDEFAULT_SKIP_MS = 200\nRETX_INTERVAL_MS = 50  # retransmit every 50ms until ack or skip\nlogging.basicConfig(level=logging.INFO, format=\"%(asctime)s %(levelname)s %(message)s\")\ndef now_ms():",
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "ACK_FLAG",
+        "kind": 5,
+        "importPath": "hudp",
+        "description": "hudp",
+        "peekOfCode": "ACK_FLAG = 0xFF\n# Channel types\nCHANNEL_RELIABLE = 0\nCHANNEL_UNRELIABLE = 1\n# Default params\nDEFAULT_SKIP_MS = 200\nRETX_INTERVAL_MS = 50  # retransmit every 50ms until ack or skip\nlogging.basicConfig(level=logging.INFO, format=\"%(asctime)s %(levelname)s %(message)s\")\ndef now_ms():\n    return int(time.time() * 1000)",
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "CHANNEL_RELIABLE",
+        "kind": 5,
+        "importPath": "hudp",
+        "description": "hudp",
+        "peekOfCode": "CHANNEL_RELIABLE = 0\nCHANNEL_UNRELIABLE = 1\n# Default params\nDEFAULT_SKIP_MS = 200\nRETX_INTERVAL_MS = 50  # retransmit every 50ms until ack or skip\nlogging.basicConfig(level=logging.INFO, format=\"%(asctime)s %(levelname)s %(message)s\")\ndef now_ms():\n    return int(time.time() * 1000)\nclass GameNetAPI:\n    def __init__(self, local_addr=(\"0.0.0.0\", 10000), peer_addr=None, on_receive: Callable=None,",
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "CHANNEL_UNRELIABLE",
+        "kind": 5,
+        "importPath": "hudp",
+        "description": "hudp",
+        "peekOfCode": "CHANNEL_UNRELIABLE = 1\n# Default params\nDEFAULT_SKIP_MS = 200\nRETX_INTERVAL_MS = 50  # retransmit every 50ms until ack or skip\nlogging.basicConfig(level=logging.INFO, format=\"%(asctime)s %(levelname)s %(message)s\")\ndef now_ms():\n    return int(time.time() * 1000)\nclass GameNetAPI:\n    def __init__(self, local_addr=(\"0.0.0.0\", 10000), peer_addr=None, on_receive: Callable=None,\n                 skip_threshold_ms=DEFAULT_SKIP_MS, max_buffered=1024):",
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "DEFAULT_SKIP_MS",
+        "kind": 5,
+        "importPath": "hudp",
+        "description": "hudp",
+        "peekOfCode": "DEFAULT_SKIP_MS = 200\nRETX_INTERVAL_MS = 50  # retransmit every 50ms until ack or skip\nlogging.basicConfig(level=logging.INFO, format=\"%(asctime)s %(levelname)s %(message)s\")\ndef now_ms():\n    return int(time.time() * 1000)\nclass GameNetAPI:\n    def __init__(self, local_addr=(\"0.0.0.0\", 10000), peer_addr=None, on_receive: Callable=None,\n                 skip_threshold_ms=DEFAULT_SKIP_MS, max_buffered=1024):\n        \"\"\"\n        on_receive(channel, seq, timestamp_ms, payload_bytes)",
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "RETX_INTERVAL_MS",
+        "kind": 5,
+        "importPath": "hudp",
+        "description": "hudp",
+        "peekOfCode": "RETX_INTERVAL_MS = 50  # retransmit every 50ms until ack or skip\nlogging.basicConfig(level=logging.INFO, format=\"%(asctime)s %(levelname)s %(message)s\")\ndef now_ms():\n    return int(time.time() * 1000)\nclass GameNetAPI:\n    def __init__(self, local_addr=(\"0.0.0.0\", 10000), peer_addr=None, on_receive: Callable=None,\n                 skip_threshold_ms=DEFAULT_SKIP_MS, max_buffered=1024):\n        \"\"\"\n        on_receive(channel, seq, timestamp_ms, payload_bytes)\n        \"\"\"",
+        "detail": "hudp",
+        "documentation": {}
+    },
+    {
+        "label": "on_receive",
+        "kind": 2,
+        "importPath": "receiver",
+        "description": "receiver",
+        "peekOfCode": "def on_receive(channel, seq, ts, payload):\n    arrival = int(time.time() * 1000)\n    if channel == CHANNEL_RELIABLE:\n        print(f\"[APP R] seq={seq} ts={ts} arrival={arrival} payload={payload.decode()}\")\n    else:\n        print(f\"[APP U] seq={seq} ts={ts} arrival={arrival} payload={payload.decode()}\")\n    # you can also append to CSV for later analysis\n    with open(LOG_CSV, \"a\", newline=\"\") as f:\n        writer = csv.writer(f)\n        writer.writerow([arrival, channel, seq, ts, payload.decode()])",
+        "detail": "receiver",
+        "documentation": {}
+    },
+    {
+        "label": "LOG_CSV",
+        "kind": 5,
+        "importPath": "receiver",
+        "description": "receiver",
+        "peekOfCode": "LOG_CSV = \"recv_log.csv\"\ndef on_receive(channel, seq, ts, payload):\n    arrival = int(time.time() * 1000)\n    if channel == CHANNEL_RELIABLE:\n        print(f\"[APP R] seq={seq} ts={ts} arrival={arrival} payload={payload.decode()}\")\n    else:\n        print(f\"[APP U] seq={seq} ts={ts} arrival={arrival} payload={payload.decode()}\")\n    # you can also append to CSV for later analysis\n    with open(LOG_CSV, \"a\", newline=\"\") as f:\n        writer = csv.writer(f)",
+        "detail": "receiver",
+        "documentation": {}
+    },
+    {
+        "label": "sample_on_receive",
+        "kind": 2,
+        "importPath": "sender",
+        "description": "sender",
+        "peekOfCode": "def sample_on_receive(channel, seq, ts, payload):\n    # sender might also receive ACKs via API logs; we don't need to handle here\n    pass\nif __name__ == \"__main__\":\n    if len(sys.argv) < 3:\n        print(\"usage: python sender.py <local_port> <peer_ip:peer_port> [rate_pps]\")\n        sys.exit(1)\n    local_port = int(sys.argv[1])\n    peer = sys.argv[2]\n    rate = float(sys.argv[3]) if len(sys.argv) >= 4 else 50.0",
+        "detail": "sender",
+        "documentation": {}
+    }
+]
