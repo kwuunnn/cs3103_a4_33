@@ -3,8 +3,8 @@ import random
 from hudp import GameNetAPI, CHANNEL_RELIABLE, CHANNEL_UNRELIABLE
 
 # Sender binds to different local port and sends to receiver port 10000
-sender = GameNetAPI(local_addr=("127.0.0.1", 10001), peer_addr=("127.0.0.1", 10000))
-
+sender = GameNetAPI(local_addr=("127.0.0.1", 10000), peer_addr=("127.0.0.1", 10001))
+sender.register_peer(("127.0.0.1", 10001))
 packet_rate = 5  # packets per second → slower
 duration = 5  # seconds
 total_packets = packet_rate * duration

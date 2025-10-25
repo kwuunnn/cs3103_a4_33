@@ -10,7 +10,7 @@ def on_receive(channel, seq, ts, payload):
 
 
 # Receiver binds to port 10000
-receiver = GameNetAPI(local_addr=("127.0.0.1", 10000), on_receive=on_receive)
+receiver = GameNetAPI(local_addr=("127.0.0.1", 10001), on_receive=on_receive)
 
 print("Receiver running... press Ctrl+C to stop")
 try:
