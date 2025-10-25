@@ -1,4 +1,4 @@
-import socket, threading, struct, time, logging
+import socket, threading, struct, time, logging, random
 from typing import Callable
 
 # Header formats
@@ -52,6 +52,7 @@ class GameNetAPI:
         self.sent_lock = threading.Lock()
 
         # Receiver sessions (per sender)
+        # sessions: addr -> {"recv_next_expected": int, "recv_buffer": {seq: (ts,payload,arrival_ms)}, "last_seen": ms}
         self.sessions = {}
         self.registered_peers = set()
 
@@ -78,13 +79,52 @@ class GameNetAPI:
     # --------------------------
     # Registration
     # --------------------------
-    def register_peer(self, addr):
-        """Manually register a known peer (sender/receiver handshake)."""
-        self.registered_peers.add(addr)
-        logging.info(f"[REGISTER] Added peer {addr}")
-        # Send a small registration packet
-        pkt = struct.pack(DATA_HDR_FMT, CHANNEL_REGISTER, 0, now_ms())
+    def register_peer(self, addr, timeout_ms=5000):
+        # Manually register a known peer (sender/receiver handshake).
+        # If already registered, we still send registration to align sequences.
+        # Choose random init seq for reliable channel.
+        init_seq = random.randint(0, 0xFFFF)
+        with self.seq_lock:
+            self.next_seq_reliable = (init_seq + 1) & 0xFFFF
+        logging.info(f"[REGISTER] Random init seq={init_seq}, next_seq_reliable={self.next_seq_reliable}")
+
+        # Create registration packet using init_seq (seq field carries init_seq)
+        timestamp_ms = now_ms()
+        pkt = struct.pack(DATA_HDR_FMT, CHANNEL_REGISTER, init_seq, timestamp_ms)
+
+        # Put registration into sent_buffer so retransmit logic will resend until acked/timeout
+        with self.sent_lock:
+            self.sent_buffer[init_seq] = {
+                "pkt": pkt,
+                "first_send_ms": timestamp_ms,
+                "last_send_ms": timestamp_ms,
+                "acked": False,
+                "retrans_count": 0,
+                "is_registration": True,
+            }
+
+        # Send first registration attempt
         self.sock.sendto(pkt, addr)
+        logging.info(f"[REGISTER] Sent registration packet to {addr} with seq={init_seq}")
+
+        # --- wait for ack (blocking) ---
+        start_time = now_ms()
+        while True:
+            with self.sent_lock:
+                info = self.sent_buffer.get(init_seq)
+                if info is None or info.get("acked"):
+                    break
+            if now_ms() - start_time > timeout_ms:
+                # give up: remove registration entry and raise
+                with self.sent_lock:
+                    if init_seq in self.sent_buffer:
+                        del self.sent_buffer[init_seq]
+                raise TimeoutError(f"Registration ACK not received from {addr} after {timeout_ms} ms")
+            time.sleep(0.01)  # small sleep to avoid busy wait
+
+        # Mark peer as registered (receiver side will also create/reset session when it sees REGISTER)
+        self.registered_peers.add(addr)
+        logging.info(f"[REGISTER COMPLETE] Peer {addr} registered successfully")
 
     # --------------------------
     # Sending
@@ -170,7 +210,7 @@ class GameNetAPI:
             except socket.timeout:
                 continue
             except ConnectionResetError:
-                logging.warning("Ignored ICMP Port Unreachable")
+                # ignore ICMP port unreachable on Windows
                 continue
 
             # Handle ACKs
@@ -188,10 +228,24 @@ class GameNetAPI:
 
             # Handle registration packet
             if channel == CHANNEL_REGISTER:
+                sess = {
+                    "recv_next_expected": (seq + 1) & 0xFFFF,
+                    "recv_buffer": {},
+                    "last_seen": arrival_ms,
+                }
+                self.sessions[addr] = sess
+                # ensure registered_peers contains addr
                 if addr not in self.registered_peers:
                     self.registered_peers.add(addr)
                     self.metrics["registrations"] += 1
-                    logging.info(f"[REGISTERED] New peer {addr}")
+                logging.info(f"[REGISTERED] Peer {addr} with init seq={seq}, next_expected={sess['recv_next_expected']}")
+
+                # Send ACK for registration
+                ackpkt = self._pack_ack(seq, ts)
+                try:
+                    self.sock.sendto(ackpkt, addr)
+                except Exception:
+                    logging.exception("failed to send ACK for register")
                 continue
 
             # Handle deregistration packet
@@ -201,14 +255,20 @@ class GameNetAPI:
                     logging.info(f"[DEREGISTERED] Session removed for {addr}")
                 if addr in self.registered_peers:
                     self.registered_peers.remove(addr)
-                continue
 
+                # Send ACK back to confirm deregister
+                ackpkt = self._pack_ack(seq, ts)
+                try:
+                    self.sock.sendto(ackpkt, addr)
+                except Exception:
+                    logging.exception("failed to send ACK for deregister")
+                continue
+            
             # Drop if unregistered
             if addr not in self.registered_peers:
                 logging.warning(f"[DROP] Ignored unregistered packet from {addr}")
                 continue
 
-            # Handle unreliable packets
             if channel == CHANNEL_UNRELIABLE:
                 self.metrics["recv_unreliable"] += 1
                 rtt = arrival_ms - ts
@@ -223,22 +283,29 @@ class GameNetAPI:
             sess = self.sessions.get(addr)
             if not sess:
                 sess = {
-                    "recv_next_expected": 0,
+                    "recv_next_expected": (seq + 1) & 0xFFFF,
                     "recv_buffer": {},
                     "last_seen": arrival_ms,
                 }
                 self.sessions[addr] = sess
-                logging.info(f"[SESSION] New session created for {addr}")
+                logging.info(f"[SESSION] Created session for {addr} on-the-fly, next_expected={sess['recv_next_expected']}")
 
             sess["last_seen"] = arrival_ms
 
-            # Send ACK
+            # Send ACK for this reliable packet
             ackpkt = self._pack_ack(seq, ts)
-            self.sock.sendto(ackpkt, addr)
+            try:
+                self.sock.sendto(ackpkt, addr)
+            except Exception:
+                logging.exception("failed to send ACK")
 
             recv_buf = sess["recv_buffer"]
-            if len(recv_buf) < self.max_buffered:
+            expected = sess["recv_next_expected"]
+            dist_forward = (seq - expected) & 0xFFFF
+            if dist_forward < self.max_buffered:
                 recv_buf[seq] = (ts, payload, arrival_ms)
+            else:
+                logging.debug(f"[BUFFER IGNORE] {addr} seq={seq} dist_forward={dist_forward} expected={expected}")
 
             self._deliver_in_order_locked(sess)
 
@@ -254,7 +321,12 @@ class GameNetAPI:
                 info["acked"] = True
                 rtt = now - info["first_send_ms"]
                 self.metrics["acks_received"] += 1
-                logging.info(f"[ACK] seq={seq} rtt_ms={rtt} retrans={info['retrans_count']}")
+                if info.get("is_registration"):
+                    logging.info(f"[REGISTER ACK] seq={seq} RTT={rtt}ms")
+                elif info.get("is_deregister"):
+                    logging.info(f"[DEREGISTER ACK] seq={seq} RTT={rtt}ms")
+                else:
+                    logging.info(f"[ACK] seq={seq} rtt_ms={rtt} retrans={info['retrans_count']}")
                 del self.sent_buffer[seq]
 
     def _deliver_in_order_locked(self, sess):
@@ -276,16 +348,19 @@ class GameNetAPI:
                 progressed = True
             else:
                 if recv_buf:
-                    earliest_seq = sorted(recv_buf.keys())[0]
+                    earliest_seq = min(recv_buf.keys(), key=lambda s: (s - expected) & 0xFFFF)
                     earliest_info = recv_buf[earliest_seq]
                     arrival_time = earliest_info[2]
-                    if now_ms() - arrival_time >= self.skip_threshold_ms:
+                    wait_time = now_ms() - arrival_time
+                    if wait_time >= self.skip_threshold_ms:
                         logging.warning(
-                            f"[SKIP R] missing seq={expected}, skipping after {now_ms()-arrival_time}ms"
+                            f"[SKIP R] missing seq={expected}, skipping after {wait_time}ms"                        
                         )
-                        sess["recv_next_expected"] = (expected + 1) & 0xFFFF
+                        sess["recv_next_expected"] = earliest_seq
                         self.metrics["lost_marked"] += 1
                         progressed = True
+                else:
+                    break
 
     def _retrans_loop(self):
         while self.running:
@@ -306,11 +381,19 @@ class GameNetAPI:
                         continue
                     if now - info["last_send_ms"] >= RETX_INTERVAL_MS:
                         try:
-                            self.sock.sendto(info["pkt"], self.peer_addr)
+                            # retransmit to peer_addr (sender mode)
+                            if self.peer_addr:
+                                self.sock.sendto(info["pkt"], self.peer_addr)
+                            else:
+                                # If no peer_addr set, we cannot retransmit.
+                                logging.debug("[RETX] no peer_addr set, cannot retransmit")
                             info["last_send_ms"] = now
                             info["retrans_count"] += 1
                             self.metrics["retransmissions"] += 1
-                            logging.info(f"[RETX] seq={seq} count={info['retrans_count']}")
+                            if info.get("is_registration"):
+                                logging.info(f"[RETX REGISTER] seq={seq} count={info['retrans_count']}")
+                            else:
+                                logging.info(f"[RETX] seq={seq} count={info['retrans_count']}")
                         except Exception:
                             logging.exception("retransmit failed")
                 for s in to_remove:
@@ -319,12 +402,41 @@ class GameNetAPI:
             time.sleep(RETX_INTERVAL_MS / 1000.0)
 
     def stop(self):
-        # If sender, send deregister
+        # If sender, send reliable deregister
         if self.peer_addr:
             try:
-                pkt = struct.pack(DATA_HDR_FMT, CHANNEL_DEREGISTER, 0, now_ms())
+                seq = random.randint(0, 0xFFFF)
+                timestamp_ms = now_ms()
+                pkt = struct.pack(DATA_HDR_FMT, CHANNEL_DEREGISTER, seq, timestamp_ms)
+                logging.info(f"[DEREGISTER] Sending deregister seq={seq} to {self.peer_addr}")
+
+                # Store in sent_buffer for retransmission until ACK
+                with self.sent_lock:
+                    self.sent_buffer[seq] = {
+                        "pkt": pkt,
+                        "first_send_ms": timestamp_ms,
+                        "last_send_ms": timestamp_ms,
+                        "acked": False,
+                        "retrans_count": 0,
+                        "is_deregister": True,
+                    }
+
                 self.sock.sendto(pkt, self.peer_addr)
-                logging.info(f"[DEREGISTER] Sent deregister to {self.peer_addr}")
+
+                # Wait for ACK or timeout
+                start = now_ms()
+                timeout_ms = 3000
+                while True:
+                    with self.sent_lock:
+                        info = self.sent_buffer.get(seq)
+                        if info is None or info.get("acked"):
+                            break
+                    if now_ms() - start > timeout_ms:
+                        logging.warning(f"[DEREGISTER] No ACK from {self.peer_addr} after {timeout_ms}ms")
+                        break
+                    time.sleep(0.01)
+
+                logging.info(f"[DEREGISTER COMPLETE] Session closed with {self.peer_addr}")
             except Exception:
                 logging.exception("Failed to send deregister packet")
 
