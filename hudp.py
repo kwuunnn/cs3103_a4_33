@@ -118,6 +118,7 @@ class GameNetAPI:
 
         if waited:
             self.registered_peers.add(addr)
+            self.metrics["registrations"] += 1
             logging.info(f"[REGISTER COMPLETE] Peer {addr} successfully registered")
         else:
             logging.warning(f"[REGISTER TIMEOUT] No ACK from {addr}, unreliable packets still allowed")             
@@ -126,16 +127,16 @@ class GameNetAPI:
     # --------------------------
     # Sending
     # --------------------------
-    def send(self, payload: bytes, reliable: bool = True):
+    def send(self, payload: bytes, reliable: int = 1):
         if self.peer_addr is None:
             raise RuntimeError("peer_addr not set")
 
-        if reliable and self.peer_addr not in self.registered_peers:
+        if reliable == CHANNEL_RELIABLE and self.peer_addr not in self.registered_peers:
             logging.warning(f"[SEND BLOCKED] Reliable send requires registration for {self.peer_addr}")
             return None
 
         with self.seq_lock:
-            if reliable:
+            if reliable == CHANNEL_RELIABLE:
                 seq = self.next_seq_reliable
                 self.next_seq_reliable = (self.next_seq_reliable + 1) & 0xFFFF
                 channel = CHANNEL_RELIABLE
@@ -148,7 +149,7 @@ class GameNetAPI:
         pkt = self._pack_data(channel, seq, timestamp_ms, payload)
         self.sock.sendto(pkt, self.peer_addr)
 
-        if reliable:
+        if reliable == CHANNEL_RELIABLE:
             self.metrics["sent_reliable"] += 1
             with self.sent_lock:
                 self.sent_buffer[seq] = {
@@ -162,7 +163,7 @@ class GameNetAPI:
             self.metrics["sent_unreliable"] += 1
 
         logging.debug(f"sent seq={seq} chan={'R' if reliable else 'U'} len={len(payload)}")
-        return seq
+        return seq, timestamp_ms
 
     def _pack_data(self, channel, seq, timestamp_ms, payload: bytes):
         hdr = struct.pack(DATA_HDR_FMT, channel, seq & 0xFFFF, timestamp_ms & 0xFFFFFFFF)
@@ -238,7 +239,6 @@ class GameNetAPI:
 
             elif channel == CHANNEL_RELIABLE:
                 # Drop if peer not registered
-                print("self.registered_peers", self.registered_peers)
                 if addr not in self.registered_peers:
                     logging.warning(f"[DROP] Ignored reliable packet from unregistered peer {addr}")
                     continue
@@ -349,6 +349,8 @@ class GameNetAPI:
             if info.get("is_registration"):
                 logging.info(f"[REGISTER ACK] seq={seq} RTT={rtt}ms")
                 self.metrics["reg_acks_recv"] += 1
+            elif info.get("is_deregister"):
+                logging.info(f"[DEREGISTER ACK] seq={seq} RTT={rtt}ms")
             else:
                 logging.info(f"[ACK] seq={seq} rtt_ms={rtt} retrans={info['retrans_count']}")
                 self.metrics["reliable_acks_recv"] += 1
@@ -421,9 +423,9 @@ class GameNetAPI:
                                 self.metrics["retransmissions"] += 1
 
                                 if info.get("is_registration"):
-                                    logging.debug(f"[RETX REGISTER] seq={seq} to {dest_addr}")
+                                    logging.info(f"[RETX REGISTER] seq={seq} to {dest_addr}, retx_count={info["retrans_count"]}")
                                 else:
-                                    logging.debug(f"[RETX RELIABLE] seq={seq} to {dest_addr}")
+                                    logging.info(f"[RETX RELIABLE] seq={seq} to {dest_addr}, retx_count={info["retrans_count"]}")
                         except Exception:
                             logging.exception("retransmit failed")
 
@@ -434,14 +436,72 @@ class GameNetAPI:
             time.sleep(RETX_INTERVAL_MS / 1000.0)
 
 
+    # def stop(self):
+    #     self.running = False
+    #     self.receiver_thread.join(timeout=1.0)
+    #     self.retrans_thread.join(timeout=1.0)
+    #     self.sock.close()
+    #     self.sessions.clear()
+    #     self.registered_peers.clear()
+    #     logging.info("[STOP] GameNetAPI stopped")
+
     def stop(self):
+        # If sender, send reliable deregister
+        if self.peer_addr and self.peer_addr in self.registered_peers:
+            try:
+                seq = random.randint(0, 0xFFFF)
+                timestamp_ms = now_ms()
+                pkt = struct.pack(DATA_HDR_FMT, CHANNEL_DEREGISTER, seq, timestamp_ms)
+                logging.info(f"[DEREGISTER] Sending deregister seq={seq} to {self.peer_addr}")
+                ev = threading.Event()
+
+                # Store in sent_buffer for retransmission until ACK
+                with self.sent_lock:
+                    self.sent_buffer[seq] = {
+                        "pkt": pkt,
+                        "first_send_ms": timestamp_ms,
+                        "last_send_ms": timestamp_ms,
+                        "acked": False,
+                        "retrans_count": 0,
+                        "is_deregister": True,
+                        "event": ev
+                    }
+
+                self.sock.sendto(pkt, self.peer_addr)
+        
+                # Wait for ACK or timeout
+                timeout_ms = 5000
+                waited = ev.wait(timeout_ms / 1000.0)
+
+                # Clean up
+                with self.sent_lock:
+                    info = self.sent_buffer.clear()
+
+                if waited:
+                    logging.info(f"[DEREGISTER COMPLETE] Session closed with {self.peer_addr}")
+                else:
+                    logging.warning(f"[DEREGISTER] No ACK from {self.peer_addr} after {timeout_ms}ms")
+            except Exception:
+                logging.exception("Failed to send deregister packet")
+        
+        # Clear sessions if receiver
+        if not self.peer_addr:
+            removed = len(self.sessions)
+            if removed == 0:
+                self.sessions.clear()
+                logging.info(f"[SESSION] Cleared {removed} sessions")
+            else:
+                logging.warning(f"[SESSION] Stopped while {removed} active session(s) remain")
+
+        # Stop threads
         self.running = False
         self.receiver_thread.join(timeout=1.0)
         self.retrans_thread.join(timeout=1.0)
-        self.sock.close()
-        self.sessions.clear()
         self.registered_peers.clear()
+        self.sock.close()
+        
         logging.info("[STOP] GameNetAPI stopped")
+
 
     def get_metrics(self):
         return self.metrics.copy()

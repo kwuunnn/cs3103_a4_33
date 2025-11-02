@@ -11,11 +11,10 @@ total_packets = packet_rate * duration
 
 for i in range(total_packets):
     payload = {"id": i, "pos": [random.randint(0, 100), random.randint(0, 100)]}
-    reliable = random.choice([True, False])
-    # reliable = False
-    seq = sender.send(str(payload).encode(), reliable=reliable)
-    ch_str = "R" if reliable else "U"
-    print(f"[SEND {ch_str}] seq={seq} payload={payload}")
+    reliable = random.choice([0, 1])
+    seq, timestamp = sender.send(str(payload).encode(), reliable=reliable)
+    ch_str = "U" if reliable == 1 else "R"
+    print(f"[SEND {ch_str}] seq={seq} ts={timestamp} payload={payload} channeltype={reliable}")
     time.sleep(1 / packet_rate)  # 0.2 sec per packet at 5 packets/sec
 
 time.sleep(2)  # wait for retransmissions/acks

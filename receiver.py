@@ -3,10 +3,8 @@ from hudp import GameNetAPI, CHANNEL_RELIABLE, CHANNEL_UNRELIABLE
 
 
 def on_receive(channel, seq, ts, payload):
-    now = int(time.time() * 1000)
-    rtt = now - ts if channel == CHANNEL_RELIABLE else None
     ch_str = "R" if channel == CHANNEL_RELIABLE else "U"
-    print(f"[RECV {ch_str}] seq={seq} ts={ts} payload={payload} rtt={rtt}ms")
+    print(f"[RECV {ch_str}] seq={seq} ts={ts} payload={payload} channeltype={channel}")
 
 
 # Receiver binds to port 10000
