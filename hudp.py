@@ -1,9 +1,11 @@
+import csv
 import socket, threading, struct, time, logging, random
 from typing import Callable
 
 # Header formats
 DATA_HDR_FMT = "!B H I"  # ChannelType (1), SeqNo (2), TimestampMs (4)
 DATA_HDR_LEN = struct.calcsize(DATA_HDR_FMT)
+METRICS_FMT = "!I I I" # sent_reliable, sent_unreliable, retransmissions
 
 ACK_HDR_FMT = "!B B H I"  # ChannelType(1), ACK_FLAG(1), SeqNo(2), TimestampMs(4)
 ACK_HDR_LEN = struct.calcsize(ACK_HDR_FMT)
@@ -34,10 +36,17 @@ class GameNetAPI:
         on_receive: Callable = None,
         skip_threshold_ms=DEFAULT_SKIP_MS,
         max_buffered=1024,
+        csv_log="recv_log.csv",
     ):
         """
         on_receive(channel, seq, timestamp_ms, payload_bytes)
         """
+        self.csv_log_file = csv_log
+        self.csv_writer = None
+        self.csv_fh = open(self.csv_log_file, 'w', newline='')
+        self.csv_writer = csv.writer(self.csv_fh)
+        self.csv_writer.writerow(["arrival", "channel", "seq", "sent_ts", "payload"])
+
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(local_addr)
         self.peer_addr = peer_addr
@@ -61,15 +70,27 @@ class GameNetAPI:
             "sent_reliable": 0,
             "sent_unreliable": 0,
             "recv_reliable": 0,
+            "recv_reliable_duplicates": 0,
             "recv_unreliable": 0,
             "reliable_acks_recv": 0,
             "retransmissions": 0,
             "lost_marked": 0,
             # Registration-specific metrics
-            "sent_reg": 0,           # number of registration packets sent
-            "recv_reg": 0,           # number of registration packets received (including retransmissions)
-            "reg_acks_recv": 0,      # number of registration ACKs received by sender
-            "registrations": 0,      # actual successful registrations
+            "sent_reg": 0,
+            "sent_dereg": 0,
+            "recv_reg": 0,
+            "reg_acks_recv": 0,
+            "registrations": 0,
+            ### NEW METRICS ###
+            "rtt_samples": [],
+            "jitter_reliable": 0.0,
+            "jitter_unreliable": 0.0,
+            "latency_reliable": 0.0,
+            "latency_unreliable": 0.0,
+            "bytes_received_reliable": 0,
+            "bytes_received_unreliable": 0,
+            "start_time": time.time(),
+            "end_time": None,
         }
 
         self.running = True
@@ -123,7 +144,6 @@ class GameNetAPI:
         else:
             logging.warning(f"[REGISTER TIMEOUT] No ACK from {addr}, unreliable packets still allowed")             
 
-
     # --------------------------
     # Sending
     # --------------------------
@@ -133,7 +153,7 @@ class GameNetAPI:
 
         if reliable == CHANNEL_RELIABLE and self.peer_addr not in self.registered_peers:
             logging.warning(f"[SEND BLOCKED] Reliable send requires registration for {self.peer_addr}")
-            return None
+            return None, None
 
         with self.seq_lock:
             if reliable == CHANNEL_RELIABLE:
@@ -199,7 +219,6 @@ class GameNetAPI:
             except socket.timeout:
                 continue
             except ConnectionResetError:
-                # ignore ICMP "port unreachable" errors on Windows
                 continue
 
             # --- Handle ACKs ---
@@ -216,8 +235,7 @@ class GameNetAPI:
 
             channel, seq, ts, payload = parsed
             arrival_ms = now_ms()
-
-            # --- Channel-specific handling ---
+            
             if channel == CHANNEL_REGISTER:
                 # Registration handshake (reliable setup)
                 self._handle_registration(addr, seq, ts)
@@ -225,12 +243,23 @@ class GameNetAPI:
 
             elif channel == CHANNEL_DEREGISTER:
                 # Peer tear-down
-                self._handle_deregistration(addr, seq, ts)
+                self._handle_deregistration(addr, seq, ts, payload)
                 continue
 
             elif channel == CHANNEL_UNRELIABLE:
                 # Always accept, even if unregistered
+                self.csv_writer.writerow([arrival_ms, channel, seq, ts, payload.decode('utf-8', errors='ignore')])
+                self.csv_fh.flush()
+
                 self.metrics["recv_unreliable"] += 1
+                self.metrics["bytes_received_unreliable"] += len(payload)
+                latency = arrival_ms - ts
+                prev_j = self.metrics["jitter_unreliable"]
+                self.metrics["jitter_unreliable"] = prev_j + (abs(latency - prev_j) - prev_j) / 16
+                self.metrics["latency_unreliable"] = (
+                    (self.metrics["latency_unreliable"] * (self.metrics["recv_unreliable"] - 1) + latency)
+                    / self.metrics["recv_unreliable"]
+                )
                 try:
                     self.on_receive(CHANNEL_UNRELIABLE, seq, ts, payload)
                 except Exception:
@@ -239,25 +268,20 @@ class GameNetAPI:
 
             elif channel == CHANNEL_RELIABLE:
                 # Drop if peer not registered
+                self.csv_writer.writerow([arrival_ms, channel, seq, ts, payload.decode('utf-8', errors='ignore')])
+                self.csv_fh.flush()
+
                 if addr not in self.registered_peers:
                     logging.warning(f"[DROP] Ignored reliable packet from unregistered peer {addr}")
                     continue
-
-                # Handle reliable data packet
                 self._handle_reliable(addr, seq, ts, payload, arrival_ms)
                 continue
-
-            # --- Unknown channel ---
             else:
                 logging.error(f"[INVALID] Unknown channel {channel} from {addr}")
                 self.metrics.setdefault("invalid_packets", 0)
                 self.metrics["invalid_packets"] += 1
                 continue
 
-
-    # --------------------------
-    # Registration (Receiver-side)
-    # --------------------------
     def _handle_registration(self, addr, seq, ts):
         self.metrics["recv_reg"] += 1
 
@@ -273,13 +297,11 @@ class GameNetAPI:
         else:
             sess["last_seen"] = now_ms()
 
-        # Add peer to registered_peers if not already
         if addr not in self.registered_peers:
             self.registered_peers.add(addr)
             self.metrics["registrations"] += 1
             logging.info(f"[REGISTERED] Peer {addr} added to registered_peers")
 
-        # Always send ACK
         ackpkt = self._pack_ack(seq, ts)
         try:
             self.sock.sendto(ackpkt, addr)
@@ -287,8 +309,22 @@ class GameNetAPI:
         except Exception:
             logging.exception("failed to send ACK for registration")
 
+    def _handle_deregistration(self, addr, seq, ts, payload):
+        if (addr not in self.registered_peers):
+            return
+        if payload:
+            try:
+                sent_rel, sent_unrel, retrans = struct.unpack(METRICS_FMT, payload)
+                logging.info(
+                    f"[METRICS RECEIVED] {addr} sent_rel={sent_rel}, sent_unrel={sent_unrel}, "
+                    f"retrans={retrans}"
+                )
+                self.metrics["sent_reliable"] += sent_rel
+                self.metrics["sent_unreliable"] += sent_unrel
+                self.metrics["retransmissions"] += retrans
+            except Exception:
+                logging.exception("Failed to parse metrics payload")
 
-    def _handle_deregistration(self, addr, seq, ts):
         self.sessions.pop(addr, None)
         self.registered_peers.discard(addr)
         logging.info(f"[DEREGISTERED] {addr}")
@@ -326,9 +362,20 @@ class GameNetAPI:
         self._deliver_in_order_locked(sess)
         logging.info(f"[RECV R] {addr} seq={seq} buffered={len(recv_buf)}")
 
-    # --------------------------
-    # ACK Handling & Delivery
-    # --------------------------
+        latency = arrival_ms - ts
+        prev_j = self.metrics["jitter_reliable"]
+        self.metrics["jitter_reliable"] = prev_j + (abs(latency - prev_j) - prev_j) / 16
+        self.metrics["latency_reliable"] = (
+            (self.metrics["latency_reliable"] * (self.metrics["recv_reliable"]) + latency)
+            / (self.metrics["recv_reliable"] + 1)
+        )
+        self.metrics["bytes_received_reliable"] += len(payload)
+
+        if seq < expected or seq in recv_buf:
+            # duplicate
+            self.metrics["recv_reliable_duplicates"] += 1
+            logging.info(f"[DUPLICATE] {addr} seq={seq} ignored")
+
     def _handle_ack(self, seq, ts):
         now = now_ms()
         with self.sent_lock:
@@ -344,6 +391,7 @@ class GameNetAPI:
                     logging.exception("failed to set ack event")
 
             rtt = now - info["first_send_ms"]
+            self.metrics["rtt_samples"].append(rtt)
 
             # Separate registration ACKs vs normal reliable ACKs
             if info.get("is_registration"):
@@ -357,7 +405,6 @@ class GameNetAPI:
 
             # Remove from sent buffer
             self.sent_buffer.pop(seq, None)
-
 
     def _deliver_in_order_locked(self, sess):
         progressed = True
@@ -389,9 +436,6 @@ class GameNetAPI:
                 else:
                     break
 
-    # --------------------------
-    # Retransmission
-    # --------------------------
     def _retrans_loop(self):
         while self.running:
             now = now_ms()
@@ -420,12 +464,20 @@ class GameNetAPI:
                                 self.sock.sendto(info["pkt"], dest_addr)
                                 info["last_send_ms"] = now
                                 info["retrans_count"] += 1
-                                self.metrics["retransmissions"] += 1
 
                                 if info.get("is_registration"):
-                                    logging.info(f"[RETX REGISTER] seq={seq} to {dest_addr}, retx_count={info["retrans_count"]}")
+                                    logging.info(
+                                        f"[RETX REGISTER] seq={seq} to {dest_addr}, retx_count={info['retrans_count']}"
+                                    )
+                                elif info.get("is_deregister"):
+                                    logging.info(
+                                        f"[RETX DEREGISTER] seq={seq} to {dest_addr}, retx_count={info['retrans_count']}"
+                                    )
                                 else:
-                                    logging.info(f"[RETX RELIABLE] seq={seq} to {dest_addr}, retx_count={info["retrans_count"]}")
+                                    self.metrics["retransmissions"] += 1
+                                    logging.info(
+                                        f"[RETX RELIABLE] seq={seq} to {dest_addr}, retx_count={info['retrans_count']}"
+                                    )
                         except Exception:
                             logging.exception("retransmit failed")
 
@@ -449,9 +501,16 @@ class GameNetAPI:
         # If sender, send reliable deregister
         if self.peer_addr and self.peer_addr in self.registered_peers:
             try:
+                metrics_payload = struct.pack(
+                    METRICS_FMT,
+                    self.metrics["sent_reliable"],
+                    self.metrics["sent_unreliable"],
+                    self.metrics["retransmissions"],
+                )
+                
                 seq = random.randint(0, 0xFFFF)
                 timestamp_ms = now_ms()
-                pkt = struct.pack(DATA_HDR_FMT, CHANNEL_DEREGISTER, seq, timestamp_ms)
+                pkt = struct.pack(DATA_HDR_FMT, CHANNEL_DEREGISTER, seq, timestamp_ms) + metrics_payload
                 logging.info(f"[DEREGISTER] Sending deregister seq={seq} to {self.peer_addr}")
                 ev = threading.Event()
 
@@ -464,11 +523,11 @@ class GameNetAPI:
                         "acked": False,
                         "retrans_count": 0,
                         "is_deregister": True,
-                        "event": ev
+                        "event": ev,
                     }
 
                 self.sock.sendto(pkt, self.peer_addr)
-        
+                self.metrics["sent_dereg"] += 1
                 # Wait for ACK or timeout
                 timeout_ms = 5000
                 waited = ev.wait(timeout_ms / 1000.0)
@@ -499,9 +558,27 @@ class GameNetAPI:
         self.retrans_thread.join(timeout=1.0)
         self.registered_peers.clear()
         self.sock.close()
-        
+        if self.csv_fh:
+            self.csv_fh.close()
+
+        self.metrics["end_time"] = time.time()
         logging.info("[STOP] GameNetAPI stopped")
 
-
     def get_metrics(self):
+        end_time = self.metrics.get("end_time") or time.time()
+        duration = max(1e-6, end_time - self.metrics["start_time"])
+        throughput_rel = self.metrics["bytes_received_reliable"] / duration
+        throughput_unrel = self.metrics["bytes_received_unreliable"] / duration
+        sent_total_r = max(1, self.metrics["sent_reliable"] + self.metrics["retransmissions"])
+        sent_total_u = max(1, self.metrics["sent_unreliable"])
+        pdr_r = (self.metrics["recv_reliable"] + self.metrics["recv_reliable_duplicates"]/ sent_total_r) * 100.0 # calculation include retransmitted and duplicated packets
+        pdr_u = (self.metrics["recv_unreliable"] / sent_total_u) * 100.0
+        self.metrics.update(
+            {
+                "throughput_reliable": throughput_rel,
+                "throughput_unreliable": throughput_unrel,
+                "pdr_reliable": pdr_r,
+                "pdr_unreliable": pdr_u,
+            }
+        )
         return self.metrics.copy()
