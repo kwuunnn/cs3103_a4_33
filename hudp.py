@@ -45,7 +45,6 @@ class GameNetAPI:
         self.csv_writer = None
         self.csv_fh = open(self.csv_log_file, 'w', newline='')
         self.csv_writer = csv.writer(self.csv_fh)
-        self.csv_writer.writerow(["arrival", "channel", "seq", "sent_ts", "payload"])
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(local_addr)
@@ -571,7 +570,7 @@ class GameNetAPI:
         throughput_unrel = self.metrics["bytes_received_unreliable"] / duration
         sent_total_r = max(1, self.metrics["sent_reliable"] + self.metrics["retransmissions"])
         sent_total_u = max(1, self.metrics["sent_unreliable"])
-        pdr_r = (self.metrics["recv_reliable"] + self.metrics["recv_reliable_duplicates"]/ sent_total_r) * 100.0 # calculation include retransmitted and duplicated packets
+        pdr_r = ((self.metrics["recv_reliable"] + self.metrics["recv_reliable_duplicates"])/ sent_total_r) * 100.0 # calculation include retransmitted and duplicated packets
         pdr_u = (self.metrics["recv_unreliable"] / sent_total_u) * 100.0
         self.metrics.update(
             {
