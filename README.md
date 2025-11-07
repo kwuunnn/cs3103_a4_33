@@ -27,9 +27,11 @@ python receiver.py
 python sender.py
 ```
 
+4. Let it run for a while (around 30 seconds). When the sender stops sending packets and no more logs appear, you can terminate the receiver programme with Ctrl+C. The metrics will be printed upon termination on both sides.
+
 You should see logs in both terminals showing sent packets, receives, ACKs, retransmissions, and final metrics.
 
-4. A `.csv` file will be generated in the current directory containing the performance metrics. You can use this data for further analysis or plotting.
+5. A `.csv` file will be generated in the current directory containing the performance metrics. You can use this data for further analysis or plotting.
 
 Plotting results
 
@@ -39,6 +41,11 @@ Plotting results
 ```bash
 python plot_analysis.py
 ```
+
+3. This will create PNG files with performance graphs in the current directory.
+   - latency_over_time.png
+   - latency_distribution.png
+   - throughput.png
 
 Tuning parameters
 
