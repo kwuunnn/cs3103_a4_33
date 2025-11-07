@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """
 Auto-generate charts and latency plots from recv_log.csv
-Usage: python3 plot_analysis.py [csv_file]
+Usage: python plot_analysis.py
 """
 
 import csv
@@ -66,7 +65,7 @@ def plot_latency_over_time(data):
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig("latency_over_time.png", dpi=150)
-    print("✓ Saved: latency_over_time.png")
+    print("Saved: latency_over_time.png")
 
 
 def plot_latency_distribution(data):
@@ -108,7 +107,7 @@ def plot_latency_distribution(data):
 
     plt.tight_layout()
     plt.savefig("latency_distribution.png", dpi=150)
-    print("✓ Saved: latency_distribution.png")
+    print("Saved: latency_distribution.png")
 
 
 def plot_throughput(data):
@@ -144,7 +143,7 @@ def plot_throughput(data):
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig("throughput.png", dpi=150)
-    print("✓ Saved: throughput.png")
+    print("Saved: throughput.png")
 
 
 def print_statistics(data):
@@ -184,7 +183,7 @@ def print_statistics(data):
         expected = list(range(all_seqs[0], all_seqs[-1] + 1))
         missing = set(expected) - set(all_seqs)
         if missing:
-            print(f"\n⚠️  Missing sequences: {sorted(missing)}")
+            print(f"\nWarning: Missing sequences: {sorted(missing)}")
             print(
                 f"   Packet loss: {len(missing)} packets ({len(missing)/len(expected)*100:.1f}%)"
             )
@@ -198,15 +197,15 @@ def print_statistics(data):
 def main():
     csv_file = sys.argv[1] if len(sys.argv) > 1 else "recv_log.csv"
 
-    print(f"\n📊 Analyzing {csv_file}...")
+    print(f"\nAnalyzing {csv_file}...")
 
     try:
         data = load_data(csv_file)
         if not data:
-            print("❌ No data found in CSV file!")
+            print("No data found in CSV file!")
             return
 
-        print(f"✓ Loaded {len(data)} packets\n")
+        print(f"Loaded {len(data)} packets\n")
 
         # Generate all plots
         print("Generating plots...")
@@ -217,18 +216,18 @@ def main():
         # Print statistics
         print_statistics(data)
 
-        print("\n✅ Analysis complete! Generated files:")
+        print("\nAnalysis complete! Generated files:")
         print("   - latency_over_time.png")
         print("   - latency_distribution.png")
         print("   - throughput.png")
         print("   - sequence_timeline.png")
-        print("\nOpen these PNG files to view your charts! 📈\n")
+        print("\nOpen these PNG files to view your charts!\n")
 
     except FileNotFoundError:
-        print(f"❌ Error: File '{csv_file}' not found!")
+        print(f"Error: File '{csv_file}' not found!")
         print("   Make sure receiver.py has been run and generated recv_log.csv")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
         import traceback
 
         traceback.print_exc()
