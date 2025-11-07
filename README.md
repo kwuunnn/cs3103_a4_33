@@ -29,6 +29,17 @@ python sender.py
 
 You should see logs in both terminals showing sent packets, receives, ACKs, retransmissions, and final metrics.
 
+4. A `.csv` file will be generated in the current directory containing the performance metrics. You can use this data for further analysis or plotting.
+
+Plotting results
+
+1. Open a terminal.
+2. Run the plotting script to generate graphs from the `.csv` data:
+
+```bash
+python plot_analysis.py
+```
+
 Tuning parameters
 
 - `DEFAULT_SKIP_MS` in `hudp.py` controls the skip threshold t (default 200 ms). Change this if you want to use a different threshold for experiments.
@@ -39,42 +50,10 @@ Interpreting logs/metrics
 
 - Sender prints whether each packet was sent on Reliable (R) or Unreliable (U) channel along with sequence number and payload.
 - Receiver prints incoming packets and RTT for reliable packets (calculated as now - timestamp included in packet).
-- At shutdown both sender and receiver print a `Metrics` dictionary that includes counts for sent/received reliable/unreliable packets, retransmissions, acks received, and lost packets marked.
+- At shutdown both sender and receiver print a `metrics` dictionary that includes counts for sent/received reliable/unreliable packets, retransmissions, acks received, and lost packets marked.
 
 Simulating network conditions
 
 - Windows: use "Clumsy" (https://jagt.github.io/clumsy/) to add packet loss, delay, duplication, or reorder on the loopback interface.
-- Linux: use `tc`/`netem` to add delay/loss/jitter, e.g.:
 
-```bash
-# add 100ms delay with 20ms jitter on interface eth0 (run as root)
-sudo tc qdisc add dev eth0 root netem delay 100ms 20ms
-# add 10% packet loss
-sudo tc qdisc change dev eth0 root netem loss 10%
-# remove netem
-sudo tc qdisc del dev eth0 root netem
-```
-
-Note: When testing locally on loopback (`127.0.0.1`), some emulators may not affect loopback traffic. If so, run sender and receiver on two local virtual interfaces or use a small emulator program (see below).
-
-Optional: small network emulator
-If you cannot use Clumsy/tc, you can insert a small Python-based emulator between sender and receiver. The repo does not include it by default, but it is straightforward to write a UDP forwarder that drops or delays packets randomly.
-
-Recommended experimental settings (for reproducibility)
-
-- Test duration: 30–60 seconds per run.
-- Packet rate: 10–100 packets/s.
-- Network scenarios: (i) Low loss: loss < 2%, small delay (10–30 ms). (ii) High loss: loss >= 10%, varied delay/jitter.
-
-What to report
-
-- Per-channel metrics (reliable vs unreliable): packet delivery ratio, average RTT/one-way latency, jitter, throughput.
-- Show sample logs and plots comparing reliability vs latency trade-offs under the different conditions.
-
-If you'd like, I can:
-
-- Add a tiny network emulator script to this repo.
-- Add a small test harness that runs both sender and receiver and collects metrics into CSV for plotting.
-- Adjust `hudp.py` to print more verbose debug logs or write logs to a file.
-
-Which of the above would you like me to do next?
+Technical Report: [Link](https://docs.google.com/document/d/1nL475hQj0SV9WIocU3CHAzUm2NM5N2jgp7wVzrusTTY/edit?tab=t.0)
